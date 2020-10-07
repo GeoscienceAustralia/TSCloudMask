@@ -8,6 +8,7 @@ import numpy as np
 import time
 import rasterio
 from spectral import envi
+from multiprocessing import Pool
 
 
 def load_s2_nbart_ts(
@@ -89,6 +90,13 @@ def load_s2_nbart_ts(
         (s2_ds["time"].size, s2_ds["y"].size, s2_ds["x"].size), dtype=np.uint8
     )
 
+       
+    s2_ds["tsmaskbuf"] = s2_ds["blue"]
+    s2_ds["tsmaskbuf"].values = np.zeros(
+        (s2_ds["time"].size, s2_ds["y"].size, s2_ds["x"].size), dtype=np.uint8
+    )
+    
+    
     return s2_ds
 
 
@@ -731,3 +739,99 @@ def testpair(sa, dwi, N, tsmask):
 
     # update the orginal time series mask
     tsmask[validx] = vtsmask
+
+
+def add_buffer(s2_ds):
+    
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = 8
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+
+    # Create a list of scene
+    paralist = [s2_ds["tsmask"].values[i, :, :] for i in np.arange(s2_ds.time.size)]
+    # Start runing the spatial_buffer function using a pool of indepedent processes
+    results = p.map(spatial_buffer, paralist)
+    # Finish the parallel runs
+    p.close()
+    # Join the results and put them back in the correct order
+    p.join()
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    for i in np.arange(s2_ds.time.size):
+        s2_ds["tsmask"].values[i, :, :] = results[i]
+
+    return s2_ds
+    
+def tsmask_filter(s2_ds):
+    
+    # create a list of tuples as input of the cloud detection functions
+    # startmap method of the Pool class from Multiprocessing module requires an ierative object for function parameters
+
+    ts_tuples = create_ts_tuples(s2_ds)
+    
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = 8
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+    # Start runing the cloud detection function using a pool of independent processes
+    results = p.starmap(perpixel_filter_direct, ts_tuples)
+    # Finish the parallel runs
+    p.close()
+    # Join the results and put them back in the correct order
+    p.join()
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    irow = s2_ds["y"].size
+    icol = s2_ds["x"].size
+    for y in np.arange(irow):
+        for x in np.arange(icol):
+            s2_ds["tsmask"].values[:, y, x] = results[y * icol + x]
+          
+
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = 8
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+
+    # create a list of scene
+    paralist = [s2_ds["tsmask"].values[i, :, :] for i in np.arange(s2_ds.time.size)]
+    # Start runing the spatial filter function using a pool of indepedent processes
+    results = p.map(spatial_filter, paralist)
+    # Finish the parallel runs
+    p.close()
+    # Join the results and put them back in the correct order
+    p.join()
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    for i in np.arange(s2_ds.time.size):
+        s2_ds["tsmask"].values[i, :, :] = results[i]
+        
+        
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = 8
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+
+    # Create a list of scene
+    paralist = [s2_ds["tsmask"].values[i, :, :] for i in np.arange(s2_ds.time.size)]
+    # Start runing the spatial_buffer function using a pool of indepedent processes
+    results = p.map(spatial_buffer, paralist)
+    # Finish the parallel runs
+    p.close()
+    # Join the results and put them back in the correct order
+    p.join()
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    for i in np.arange(s2_ds.time.size):
+        s2_ds["tsmaskbuf"].values[i, :, :] = results[i]
+        
+    return s2_ds
