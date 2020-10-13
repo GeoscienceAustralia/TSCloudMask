@@ -90,13 +90,11 @@ def load_s2_nbart_ts(
         (s2_ds["time"].size, s2_ds["y"].size, s2_ds["x"].size), dtype=np.uint8
     )
 
-       
     s2_ds["tsmaskbuf"] = s2_ds["blue"]
     s2_ds["tsmaskbuf"].values = np.zeros(
         (s2_ds["time"].size, s2_ds["y"].size, s2_ds["x"].size), dtype=np.uint8
     )
-    
-    
+
     return s2_ds
 
 
@@ -547,7 +545,59 @@ def output_ds_to_ENVI(bandsets, outbandnames, dirc, s2_ds):
         envi.write_envi_header(hdrfilename, h)
 
 
-# In[ ]:
+def output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, s2_ds):
+
+    """
+
+    Function Name: output_ds_to_ENVI
+
+    Description: 
+
+    This function outputs a set of dataarrays in a dataset as cloud-optimised GeoTIFF files
+
+    Parameters:
+    
+    bandsets: list of string
+        specified the names of the dataarray in the dataset to be saved 
+    
+    dirc: string 
+        the directory where the image files are save 
+
+    loc_str: string 
+        the name of location where the image data are from, the string will be part of the file names 
+    
+    s2_ds: Xarray dataset Object
+        the dataset contains the dataarrays
+
+    Return:  
+
+    None
+    
+    """
+
+    # Create a list of date strings from the time series of time in the dataset
+
+    timebandnames = get_timebandnames(s2_ds)
+
+    xs = s2_ds["x"].size
+    ys = s2_ds["y"].size
+
+    for bandname, outputname in zip(bandsets, outbandnames):
+        banddata = s2_ds[bandname]
+
+        for i in range(len(s2_ds.time)):
+
+            #  date of the satellite image as part of the name of the GeoTIFF
+            datestr = timebandnames[i]
+
+            # Convert current time step into a `xarray.DataArray`
+            singletimestamp_da = banddata[i]
+
+            # Create output filename
+            filename = dirc + "/" + loc_str + "_" + outputname + "_" + datestr + ".tif"
+
+            # Write GeoTIFF
+            write_cog(geo_im=singletimestamp_da, fname=filename, overwrite=True)
 
 
 def spatial_filter(onescene):
@@ -742,7 +792,7 @@ def testpair(sa, dwi, N, tsmask):
 
 
 def add_buffer(s2_ds):
-    
+
     results = []
 
     # number of process for the  pool object
@@ -764,14 +814,15 @@ def add_buffer(s2_ds):
         s2_ds["tsmask"].values[i, :, :] = results[i]
 
     return s2_ds
-    
+
+
 def tsmask_filter(s2_ds):
-    
+
     # create a list of tuples as input of the cloud detection functions
     # startmap method of the Pool class from Multiprocessing module requires an ierative object for function parameters
 
     ts_tuples = create_ts_tuples(s2_ds)
-    
+
     results = []
 
     # number of process for the  pool object
@@ -791,12 +842,9 @@ def tsmask_filter(s2_ds):
     for y in np.arange(irow):
         for x in np.arange(icol):
             s2_ds["tsmask"].values[:, y, x] = results[y * icol + x]
-          
 
     results = []
 
-    # number of process for the  pool object
-    number_of_workers = 8
     # Create a Pool object with a number of processes
     p = Pool(number_of_workers)
 
@@ -812,12 +860,9 @@ def tsmask_filter(s2_ds):
     # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
     for i in np.arange(s2_ds.time.size):
         s2_ds["tsmask"].values[i, :, :] = results[i]
-        
-        
+
     results = []
 
-    # number of process for the  pool object
-    number_of_workers = 8
     # Create a Pool object with a number of processes
     p = Pool(number_of_workers)
 
@@ -833,5 +878,5 @@ def tsmask_filter(s2_ds):
     # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
     for i in np.arange(s2_ds.time.size):
         s2_ds["tsmaskbuf"].values[i, :, :] = results[i]
-        
+
     return s2_ds
