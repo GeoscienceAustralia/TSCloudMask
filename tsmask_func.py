@@ -3,8 +3,7 @@
 
 # In[ ]:
 
-import DEADataHandling
-import numpy as np
+
 import time
 import rasterio
 from spectral import envi
