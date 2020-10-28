@@ -8,6 +8,7 @@ import time
 import rasterio
 from spectral import envi
 from multiprocessing import Pool
+import numpy as np
 
 
 def load_s2_nbart_ts(
