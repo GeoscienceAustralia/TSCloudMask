@@ -781,7 +781,7 @@ def testpair(sa, dwi, N, tsmask):
                     vtsmask[k : k + N] = 2
                     chmarker[k : k + N] = 1
 
-            elif mid > m2 and mid > 0:
+            elif mid > m2 and m2 > 0:
                 if (mid - m2) / m2 > sspkthd and m2 < shadowthd:
                     # shadow pixels
                     vtsmask[k : k + N] = 3
