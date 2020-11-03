@@ -10,7 +10,7 @@ from spectral import envi
 from multiprocessing import Pool
 import numpy as np
 import datacube
-
+from datacube.utils.cog import write_cog
 
 def load_s2_nbart_ts(
     dc, lat_top, lat_bottom, lon_left, lon_right, start_of_epoch, end_of_epoch
