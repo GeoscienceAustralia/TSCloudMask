@@ -580,9 +580,6 @@ def output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, s2_ds):
 
     timebandnames = get_timebandnames(s2_ds)
 
-    xs = s2_ds["x"].size
-    ys = s2_ds["y"].size
-
     for bandname, outputname in zip(bandsets, outbandnames):
         banddata = s2_ds[bandname]
 
@@ -598,7 +595,7 @@ def output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, s2_ds):
             filename = dirc + "/" + loc_str + "_" + outputname + "_" + datestr + ".tif"
 
             # Write GeoTIFF
-            write_cog(geo_im=singletimestamp_da, fname=filename, overwrite=True)
+            write_cog(geo_im=singletimestamp_da, fname=filename, nodata=255, overwrite=True)
 
 
 def spatial_filter(onescene):
