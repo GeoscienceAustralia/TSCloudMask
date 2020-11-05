@@ -348,11 +348,6 @@ def perpixel_filter_direct(blue, green, red, nir, swir1, swir2, tsmask):
     return tsmask
 
 
-# In[ ]:
-
-
-# Function F8
-
 
 def create_ts_tuples(s2_ds):
 
@@ -408,8 +403,6 @@ def create_ts_tuples(s2_ds):
     return ts_tuples
 
 
-# In[ ]:
-
 
 def write_multi_time_dataarray_v2(filename, dataarray, xs, ys, **profile_override):
 
@@ -461,7 +454,6 @@ def write_multi_time_dataarray_v2(filename, dataarray, xs, ys, **profile_overrid
             dest.write(dataarray.isel(time=time_idx).data, bandnum)
 
 
-# In[ ]:
 
 
 def get_timebandnames(s2_ds):
@@ -493,8 +485,6 @@ def get_timebandnames(s2_ds):
 
     return timelist
 
-
-# In[ ]:
 
 
 def output_ds_to_ENVI(bandsets, outbandnames, dirc, s2_ds):
@@ -636,8 +626,6 @@ def spatial_filter(onescene):
     return tsmask
 
 
-# In[ ]:
-
 
 def spatial_buffer(onescene):
 
@@ -680,7 +668,6 @@ def spatial_buffer(onescene):
     return tsmask
 
 
-# In[ ]:
 
 
 def testpair(sa, dwi, N, tsmask):
