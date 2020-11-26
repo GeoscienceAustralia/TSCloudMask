@@ -92,7 +92,7 @@ def load_s2_nbart_ts_cor_dask(
 
 
 
-def tsmask_filter_block(s2_ds, block):
+def tsmask_filter_block(s2_ds, block, ncpu):
     
     # Define the spatial subset
     
@@ -188,7 +188,7 @@ def tsmask_filter_block(s2_ds, block):
     results = []
     
     # number of process for the  pool object
-    number_of_workers = 14
+    number_of_workers = ncpu
     
     # Create a Pool object with a number of processes
     p = Pool(number_of_workers)
@@ -404,9 +404,11 @@ def create_blocks(irow, icol, my, mx):
 def create_blocks_v2(irow, icol, ss):
     
    
-    nrow=ss//icol +1
+    nrow=ss//icol + 1
     
-    zy=irow//nrow +1
+    zy=irow//nrow + 1
+    
+    nrow = irow // zy + 1
     
     blist=[]
 
@@ -422,7 +424,64 @@ def create_blocks_v2(irow, icol, ss):
     return blist
 
 
-start_of_epoch, end_of_epoch = "2015-01-01", "2020-12-31"
+param=sys.argv
+argc = len(param)
+
+if (argc != 12):
+    print("Usage: python3 tsmask-dask-cython.py ncpu mem y1 y2 x1 x2 proj start_of_epoch end_of_epoch dirc, loc_str")  
+    print("ncpu: number of cpu cores available")
+    print("mem: system memory in GB")
+    print("y1: latitude of the top of the bounding box")
+    print("y2: latitude of the bottom of the bounding box")
+    print("x1: longitude of the left of the bounding box")
+    print("x2: longitude of the right of the bounding box")
+    print("proj: projection 0: EPSG:3577, 1: EPSG:4326")
+    print("start_of_epoch: Start of time epoch")
+    print("end_of_epoch: End of time epoch")
+    print("dirc: Output directory")
+    print("loc_str: location string in the output filename")
+   
+    return
+    
+    
+   
+
+# number of cpu cores available
+ncpu = int(param[1])
+
+# system memory in GB
+mem = int(param[2])
+
+# latitude of the top of the bounding box
+y1 = float(param[3])
+
+# latitude of the bottom of the bounding box
+y2 = float(param[4])
+
+# longitude of the left of the bounding box
+x1 = float(param[5])
+
+# longitude of the right of the bounding box
+x2 = float(param[6])
+
+# projection 0: EPSG:3577, 1: EPSG:4326,  
+proj = int(param[7])
+
+# Start of time epoch
+start_of_epoch = param[8]
+
+# End of time epoch
+end_of_epoch = param[9]
+
+# Output directory
+dirc = param[10]
+
+# location string in the output filename
+loc_str = param[11]
+
+
+
+#start_of_epoch, end_of_epoch = "2015-01-01", "2020-12-31"
 #simpson desert
 #(y1, y2, x1, x2) =  (-2682355.0, -2725625.0, 438225.0, 469355.0)
 
@@ -432,14 +491,14 @@ start_of_epoch, end_of_epoch = "2015-01-01", "2020-12-31"
 
 #Tile 55JGK
 #(y1, y2, x1, x2) = (-27.087734,  -28.09861708, 149.01710236, 150.15181468)
-(y1, y2, x1, x2) = (-27.087734,  -27.59315, 149.01710236, 149.5844)
+#(y1, y2, x1, x2) = (-27.087734,  -27.59315, 149.01710236, 149.5844)
 
 
 dc = datacube.Datacube(app='load_clearsentinel')
 
 tg_ds=load_s2_nbart_ts_cor_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
         "time": 1,
-    }, 1   )
+    }, proj   )
 
 
 
@@ -448,20 +507,17 @@ irow=tg_ds['y'].size
 icol=tg_ds['x'].size
 tn = tg_ds['time'].size
 
-mem=128
+#mem=128
 
-#my=800
-#mx=800
-#blist=create_blocks(irow, icol, my, mx)
 print(irow, icol, tn)
 
-ss=int(720000*2.1*550*mem/tn/64)
+ss = int(720000*2.1*550*mem/tn/64)
 
 blist=create_blocks_v2(irow, icol, ss)
 
 for block in blist:
       
-    tsmask_filter_block(tg_ds, block)
+    tsmask_filter_block(tg_ds, block, ncpu)
 
 
 
@@ -469,7 +525,7 @@ for block in blist:
 results = []
 
 # number of process for the  pool object
-number_of_workers = 14
+number_of_workers = ncpu
 
 # Create a Pool object with a number of processes
 p = Pool(number_of_workers)
@@ -498,8 +554,9 @@ bandsets=['tsmask']
 outbandnames=['tsmask']
 #dirc='/g/data/u46/pjt554/tsmask_validation_data/simpson'
 #loc_str='simpson'
-dirc='/g/data/u46/pjt554/tsmask_validation_data/55JGK'
-loc_str='55JGK'
+#dirc='/g/data/u46/pjt554/tsmask_validation_data/55JGK'
+#loc_str='55JGK'
+
 tsf.output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, tg_ds)
 
 
