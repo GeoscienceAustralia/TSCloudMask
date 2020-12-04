@@ -8,7 +8,7 @@ import numpy as np
 # currently part of the Cython distribution).
 cimport numpy as np
 from libc.stdlib cimport malloc, free
-
+from libc.math cimport sqrt
 
 DTYPEINT = np.int
 DTYPEFL = np.float32
@@ -17,6 +17,7 @@ DTYPEINT8 = np.uint8
 ctypedef np.int_t DTYPEINT_t
 ctypedef np.float32_t DTYPEFL_t
 ctypedef np.uint8_t DTYPEINT8_t
+ctypedef np.int16_t DTYPEINT16_t
 
 cimport cython
 
@@ -132,9 +133,10 @@ cdef float findnbsa( float* vsa, int k, int N, int vss, DTYPEINT8_t* dws_flags, 
         return 0
     else:
         return mid / (2 * N)
-    
-    
-def testpair(float[:] sa, float[:] dwi, int N, DTYPEINT8_t[:] tsmask):
+
+#def testpair(float[:] sa, float[:] dwi, int N, DTYPEINT8_t[:] tsmask):
+#cdef testpair(float* sa, float* dwi, int N, DTYPEINT8_t[:] tsmask):
+cdef testpair(float* sa, float* dwi, int N, DTYPEINT8_t* tsmask, int tn):
 
     """
 
@@ -174,10 +176,10 @@ def testpair(float[:] sa, float[:] dwi, int N, DTYPEINT8_t[:] tsmask):
     # The shadow pixel theshold
     cdef float shadowthd = 0.055
     
-    cdef int tn
+    #cdef int tn
     
     # length of the time series
-    tn=tsmask.size
+    #tn=tsmask.size
     
 
     # Find all clear pixels in the time series
@@ -407,5 +409,225 @@ def spatial_filter(onescene):
                 if np.logical_or(block == 2, block == 3).sum() < M + 1:
                     tsmask[y + 1, x + 1] = 1
 
+    return tsmask
+
+def spatial_filter_v2(onescene):
+
+    """
+
+    Function Name: 
+
+    Description: 
+    
+    This function labels cloud and shadow pixels with less than M surrounding cloud/shadow pixels as clear pixels
+  
+    Parameters:
+    
+    onescene: uint8, 2D array
+        One scene of the tsmask dataarray
+        
+    Return:  
+    
+    updated tsmask with cloud/shadow mask values
+ 
+    """
+    
+    cdef int M = 2
+    cdef int N = 8
+    
+    cdef int irow, icol, y, x, pnum, idx, cc, i, didx
+    
+    cdef int dy[8]
+    cdef int dx[8]
+    
+    dy[:] = [-1, -1, -1, 0, 1, 1, 1, 0]
+    dx[:] = [-1, 0, 1, 1, 1, 0, -1, -1]
+    
+    irow, icol = onescene.shape
+    
+    pnum = irow * icol
+    
+    tsmask = <DTYPEINT8_t *> malloc(pnum*sizeof(char))
+    
+    for y in range(irow):
+        for x in range(icol):
+            idx = y*icol + x
+            tsmask[idx] = onescene[y, x]
+    
+    for y in range(1, irow-1):
+        for x in range(1, icol-1):
+            # if the center pixel in the block is a cloud or shadow
+            idx = y * icol + x
+            if (tsmask[idx] == 2 or tsmask[idx] == 3):
+                # if total number of cloud/shadow pixels in the block is less than M+1,
+                # label the center pixel as a clear pixel
+                cc=0
+                for i in range(N):
+                    didx = (y+dy[i])*icol + x + dx[i]
+                    if (tsmask[didx] ==2 or tsmask[didx]==3):
+                        cc += 1
+                    
+                if (cc < M):
+                    tsmask[idx] = 1
+                    
+    
+    for y in range(irow):
+        for x in range(icol):
+            idx = y*icol + x
+            onescene[y, x] = tsmask[idx] 
+    
+    free(tsmask)
+
+    return onescene
+
+def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, tsmask):
+
+    """
+
+    Function Name: perpixel_filter_direct
+
+    Description: 
+    
+    This function performs time series cloud/shadow detection for one pixel
+  
+    Parameters: 
+    
+    blue, green, red, nir, swir1, swir2: float, 1D arrays
+        Surface reflectance time series data of band blue, green, red, nir, swir1, swir2 for the pixel
+        
+    tsmask: float, 1D array
+        Cloud /shadow mask time series for the pixel
+    
+    Return:  
+    
+    Updated cloud/shadow mask time serie
+
+ 
+    """
+    
+    cdef int tn
+   
+    # length of the time series
+    tn = tsmask.size
+    
+    sa = <float *> malloc(tn*sizeof(float))
+    mndwi = <float *> malloc(tn*sizeof(float))
+    msavi = <float *> malloc(tn*sizeof(float))
+    wbi = <float *> malloc(tn*sizeof(float))
+    rgm = <float *> malloc(tn*sizeof(float))
+    grbm = <float *> malloc(tn*sizeof(float))
+    ctsmask = <DTYPEINT8_t *> malloc(tn*sizeof(char))
+    
+    cdef float blue_t, green_t, red_t, nir_t, swir1_t, swir2_t
+    cdef float scale = 10000.0
+    cdef float ival = -999.0/scale
+    
+    cdef int i
+    cdef float scom
+    
+    # Bright cloud theshold
+    cdef float maxcldthd = 0.45
+    
+    for i in range(tn):
+        ctsmask[i]=1
+        blue_t = blue[i]/scale
+        green_t = green[i]/scale
+        red_t = red[i]/scale
+        nir_t = nir[i]/scale
+        swir1_t = swir1[i]/scale
+        swir2_t = swir2[i]/scale
+        #print(blue_t, green_t, red_t, nir_t, swir1_t, swir2_t)
+        if (blue_t <=ival or green_t<=ival or red_t<=ival or nir_t<=ival or swir1_t<=ival or swir2_t<=ival or 
+            blue_t == 0 or green_t == 0 or red_t==0 or nir_t ==0 or swir1_t==0 or swir2_t==0):
+            ctsmask[i]=0
+        else:
+            sa[i] = (blue_t+green_t+red_t+nir_t+swir1_t+swir2_t)/6
+            if (green_t + swir1_t !=0):
+                mndwi[i] = ((green_t - swir1_t) / (green_t + swir1_t))
+            else:
+                ctsmask[i]=0
+            scom = (2*nir_t+1)*(2*nir_t+1) - 8*(nir_t - red_t)
+            if (scom > 0):
+                msavi[i] = (2 * nir_t + 1 -sqrt(scom))/2
+            else:
+                ctsmask[i]=0
+            
+            wbi[i] = (red_t - blue_t) / blue_t
+            rgm[i] = red_t + blue_t
+            grbm[i] = (green_t - (red_t + blue_t) / 2) / ((red_t + blue_t) / 2)
+                      
+   
+            # label all ultra-bright pixels as clouds
+            if (sa[i] > maxcldthd):
+                ctsmask[i] = 2
+    
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # detect 2 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 2, ctsmask, tn)
+    testpair(sa, mndwi, 2, ctsmask, tn)
+
+    # detect 3 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 3, ctsmask, tn)
+
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # cloud shadow theshold
+    cdef float shdthd = 0.05
+
+    # mndwi water pixel theshold
+    cdef float dwithd = -0.05
+
+    # mndwi baregroud pixel theshold
+    cdef float landcloudthd = -0.38
+
+    # msavi water pixel theshold
+    cdef float avithd = 0.06
+
+    # mndwi water pixel theshold
+    cdef float wtdthd = -0.2
+
+    cdef DTYPEINT8_t lab
+                      
+    for i in range(tn):
+
+        lab = ctsmask[i]
+        if lab == 3 and mndwi[i] > dwithd and sa[i] < shdthd:  # water pixel, not shadow
+            ctsmask[i] = 1
+
+        if lab == 2 and mndwi[i] < landcloudthd:  # bare ground, not cloud
+            ctsmask[i] = 1
+
+        if (
+            lab == 3 and msavi[i] < avithd and mndwi[i] > wtdthd
+        ):  # water pixel, not shadow
+            ctsmask[i] = 1
+
+        if (
+            lab == 1
+            and wbi[i] < -0.02
+            and rgm[i] > 0.06
+            and rgm[i] < 0.29
+            and mndwi[i] < -0.1
+            and grbm[i] < 0.2
+        ):  # thin cloud
+            ctsmask[i] = 2
+
+
+    for i in range(tn):
+        tsmask[i] = ctsmask[i]
+            
+    free(sa)
+    free(mndwi)
+    free(msavi)
+    free(wbi)
+    free(rgm)
+    free(grbm)
+    free(ctsmask)
+    
     return tsmask
 
