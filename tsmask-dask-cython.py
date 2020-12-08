@@ -17,7 +17,15 @@ import testpair as cym
 
 
 # In[2]:
-
+def utm_code(x1, x2):
+    
+    mid =  (x1 + x2)/2
+    
+    zone = int(mid/6) + 31
+    
+    code = 'EPSG:327'+str(zone)
+    
+    return code
 
 def load_s2_nbart_ts_cor_dask(
     dc, lat_top, lat_bottom, lon_left, lon_right, start_of_epoch, end_of_epoch, chunks, cor_type
@@ -49,11 +57,15 @@ def load_s2_nbart_ts_cor_dask(
         "group_by": "solar_day",
         }
     elif (cor_type==1):
+        
+        #UTM projection zone code
+        outcrs = utm_code(lon_left, lon_right)
+        
         newquery = {
         "x": (lon_left, lon_right),
         "y": (lat_top, lat_bottom),
         "time": (start_of_epoch, end_of_epoch),
-        "output_crs": "EPSG:3577",
+        "output_crs": outcrs,
         "resolution": (-20, 20),
         "measurements": allbands,
         "dask_chunks": chunks,
@@ -221,7 +233,7 @@ def create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, tsmask):
 
 def create_blocks_v2(irow, icol, ss):
     
-    ss = ss * 6
+    
 
     nrow=ss//icol + 1
     
@@ -242,160 +254,162 @@ def create_blocks_v2(irow, icol, ss):
     return blist
 
 
-
-param=sys.argv
-argc = len(param)
-
-if ( argc != 12 ):
+def main():
     
-    print("Usage: python3 tsmask-dask-cython.py ncpu mem y1 y2 x1 x2 proj start_of_epoch end_of_epoch dirc loc_str")  
-    print("ncpu: number of cpu cores available")
-    print("mem: system memory in GB")
-    print("y1: latitude of the top of the bounding box")
-    print("y2: latitude of the bottom of the bounding box")
-    print("x1: longitude of the left of the bounding box")
-    print("x2: longitude of the right of the bounding box")
-    print("proj: projection 0: EPSG:3577, 1: EPSG:4326")
-    print("start_of_epoch: Start of time epoch")
-    print("end_of_epoch: End of time epoch")
-    print("dirc: Output directory")
-    print("loc_str: location string for the output file name")
+    param=sys.argv
+    argc = len(param)
 
-    
-    exit()
+    if ( argc != 12 ):
 
-    
-## number of cpu cores available
-ncpu = int(param[1])
-
-# system memory in GB
-mem = int(param[2])
-
-# latitude of the top of the bounding box
-y1 = float(param[3])
-
-# latitude of the bottom of the bounding box
-y2 = float(param[4])
-
-# longitude of the left of the bounding box
-x1 = float(param[5])
-
-# longitude of the right of the bounding box
-x2 = float(param[6])
-
-# projection 0: EPSG:3577, 1: EPSG:4326,  
-proj = int(param[7])
-
-# Start of time epoch
-start_of_epoch = param[8]
-
-# End of time epoch
-end_of_epoch = param[9]
-
-# Output directory
-dirc = param[10]
-
-# location string in the output filename
-loc_str = param[11]
+        print("Usage: python3 tsmask-dask-cython.py ncpu mem y1 y2 x1 x2 proj start_of_epoch end_of_epoch dirc loc_str")  
+        print("ncpu: number of cpu cores available")
+        print("mem: system memory in GB")
+        print("y1: latitude of the top of the bounding box")
+        print("y2: latitude of the bottom of the bounding box")
+        print("x1: longitude of the left of the bounding box")
+        print("x2: longitude of the right of the bounding box")
+        print("proj: projection 0: EPSG:3577, 1: EPSG:4326")
+        print("start_of_epoch: Start of time epoch")
+        print("end_of_epoch: End of time epoch")
+        print("dirc: Output directory")
+        print("loc_str: location string for the output file name")
 
 
+        exit()
 
 
-#Tile 55HGU
-#(y1, y2, x1, x2) =  (-36.99497079, -38.01366742, 149.24791461, 150.52675786)
+    ## number of cpu cores available
+    ncpu = int(param[1])
 
+    # system memory in GB
+    mem = int(param[2])
 
+    # latitude of the top of the bounding box
+    y1 = float(param[3])
 
+    # latitude of the bottom of the bounding box
+    y2 = float(param[4])
 
-dc = datacube.Datacube(app='load_clearsentinel')
+    # longitude of the left of the bounding box
+    x1 = float(param[5])
 
-tg_ds=load_s2_nbart_ts_cor_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
-        "time": 1,
-    }, proj   )
+    # longitude of the right of the bounding box
+    x2 = float(param[6])
+
+    # projection 0: EPSG:3577, 1: EPSG:4326,  
+    proj = int(param[7])
+
+    # Start of time epoch
+    start_of_epoch = param[8]
+
+    # End of time epoch
+    end_of_epoch = param[9]
+
+    # Output directory
+    dirc = param[10]
+
+    # location string in the output filename
+    loc_str = param[11]
 
 
 
 
-irow=tg_ds['y'].size
-icol=tg_ds['x'].size
-tn = tg_ds['time'].size
-
-
-print(tn , irow, icol)
-
-#Create numpy array to store TSmask results
-mtsmask = np.zeros((tn, irow, icol), dtype=np.uint8)
-
-# Memory factor, the higher value, the large memory footprint of the filter algorithm 
-mfr = 12.6
-
-# Calculate how many pixels/time stamps can be accommodated by the system memory
-ss = int(720000*mfr*550*mem/tn/64)
-
-# Divide the dataset in multiple smaller chunks 
-blist=create_blocks_v2(irow, icol, ss)
-
-# Run time series cloud detection function in chunks
-for block in blist:
-      
-    tsmask_filter_block(tg_ds, block, ncpu, mtsmask)
-    
-
-
-print("Begin applying spatial filter")
-
-results = []
-
-# number of process for the  pool object
-number_of_workers = ncpu
-
-# Create a Pool object with a number of processes
-p = Pool(number_of_workers)
-
-# create a list of scene
-paralist = [mtsmask[i, :, :] for i in range(tn)]
-
-# Start runing the spatial filter function using a pool of indepedent processes
-results = p.map(cym.spatial_filter_v2, paralist)
-
-
-# Finish the parallel runs
-p.close()
-
-# Join the results and put them back in the correct order
-p.join()
-
-
-# Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
-for i in np.arange(tg_ds.time.size):
-    mtsmask[i, :, :] = results[i]
-    
-
-# Add tsmask dataarray to the dataset
- 
-
-tg_ds["tsmask"] = tg_ds["blue"]
-tg_ds["tsmask"].values = mtsmask
-
-print("Begin writing output files")
-
-    
-#output the tsmask as cloud optimised geotiff files
-bandsets=['tsmask']
-outbandnames=['tsmask']
-
-tsf.output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, tg_ds)
+    #Tile 55HGU
+    #(y1, y2, x1, x2) =  (-36.99497079, -38.01366742, 149.24791461, 150.52675786)
 
 
 
 
-print(tg_ds['tsmask'][:, 53, 3])
+    dc = datacube.Datacube(app='load_clearsentinel')
 
-print(tg_ds['tsmask'][:, 153, 853])
-
-
-print(tg_ds['tsmask'][100, :, :])
-
+    tg_ds=load_s2_nbart_ts_cor_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
+            "time": 1,
+        }, proj   )
 
 
 
+
+    irow=tg_ds['y'].size
+    icol=tg_ds['x'].size
+    tn = tg_ds['time'].size
+
+
+    print(tn , irow, icol)
+
+    #Create numpy array to store TSmask results
+    mtsmask = np.zeros((tn, irow, icol), dtype=np.uint8)
+
+    # Memory factor, the higher value, the large memory footprint of the filter algorithm 
+    mfr = 3.2
+
+    # Calculate how many pixels/time stamps can be accommodated by the system memory
+    ss = int(720000*mfr*550*mem/tn/64)
+
+    # Divide the dataset in multiple smaller chunks 
+    blist=create_blocks_v2(irow, icol, ss)
+
+    # Run time series cloud detection function in chunks
+    for block in blist:
+
+        tsmask_filter_block(tg_ds, block, ncpu, mtsmask)
+
+
+
+    print("Begin applying spatial filter")
+
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = ncpu
+
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+
+    # create a list of scene
+    paralist = [mtsmask[i, :, :] for i in range(tn)]
+
+    # Start runing the spatial filter function using a pool of indepedent processes
+    results = p.map(cym.spatial_filter_v2, paralist)
+
+
+    # Finish the parallel runs
+    p.close()
+
+    # Join the results and put them back in the correct order
+    p.join()
+
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    for i in range(tn):
+        mtsmask[i, :, :] = results[i]
+
+
+    # Add tsmask dataarray to the dataset
+
+
+    tg_ds["tsmask"] = tg_ds["blue"]
+    tg_ds["tsmask"].values = mtsmask
+
+    print("Begin writing output files")
+
+
+    #output the tsmask as cloud optimised geotiff files
+    bandsets=['tsmask']
+    outbandnames=['tsmask']
+
+    tsf.output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, tg_ds)
+
+
+
+
+    print(tg_ds['tsmask'][:, 53, 3])
+
+    print(tg_ds['tsmask'][:, 153, 853])
+
+
+    print(tg_ds['tsmask'][100, :, :])
+
+
+
+if __name__ == '__main__':
+    main()
