@@ -480,8 +480,9 @@ def spatial_filter_v2(onescene):
 
     return onescene
 
-def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, tsmask):
-
+#def perpixel_filter_direct_core(blue, green, red, nir, swir1, swir2, tsmask):
+#def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, tsmask):
+def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2):
     """
 
     Function Name: perpixel_filter_direct
@@ -495,7 +496,7 @@ def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTY
     blue, green, red, nir, swir1, swir2: float, 1D arrays
         Surface reflectance time series data of band blue, green, red, nir, swir1, swir2 for the pixel
         
-    tsmask: float, 1D array
+    tsmask: uint8, 1D array
         Cloud /shadow mask time series for the pixel
     
     Return:  
@@ -508,7 +509,8 @@ def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTY
     cdef int tn
    
     # length of the time series
-    tn = tsmask.size
+    #tn = tsmask.size
+    tn = blue.size
     
     sa = <float *> malloc(tn*sizeof(float))
     mndwi = <float *> malloc(tn*sizeof(float))
@@ -617,7 +619,8 @@ def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTY
         ):  # thin cloud
             ctsmask[i] = 2
 
-
+    tsmask=np.zeros(tn, dtype=np.uint8)
+    
     for i in range(tn):
         tsmask[i] = ctsmask[i]
             

@@ -16,6 +16,11 @@ import dask.array as da
 import testpair as cym
 
 
+import dask
+from dask.distributed import Client
+
+
+
 # In[2]:
 def utm_code(x1, x2):
     
@@ -112,24 +117,38 @@ def tsmask_filter_block(s2_ds, block, ncpu, mtsmask):
     # Load NABR-T data from Dask array
     
    
-    blue = s2_ds["blue"][:, r1:r2, c1:c2].values
+    #blue = s2_ds["blue"][:, r1:r2, c1:c2].values
+    blue = s2_ds["blue"].values
     print("Finish loading the blue band")
-    green = s2_ds["green"][:, r1:r2, c1:c2].values
+    #green = s2_ds["green"][:, r1:r2, c1:c2].values
+    green = s2_ds["green"].values
     print("Finish loading the green band")
-    red = s2_ds["red"][:, r1:r2, c1:c2].values
+    #red = s2_ds["red"][:, r1:r2, c1:c2].values
+    red = s2_ds["red"].values
     print("Finish loading the red band")
-    nir = s2_ds["nir"][:, r1:r2, c1:c2].values
+    #nir = s2_ds["nir"][:, r1:r2, c1:c2].values
+    nir = s2_ds["nir"].values
     print("Finish loading the nir band")
-    swir1 = s2_ds["swir1"][:, r1:r2, c1:c2].values
+    #swir1 = s2_ds["swir1"][:, r1:r2, c1:c2].values
+    swir1 = s2_ds["swir1"].values
     print("Finish loading the swir1 band")
-    swir2 = s2_ds["swir2"][:, r1:r2, c1:c2].values
+    #swir2 = s2_ds["swir2"][:, r1:r2, c1:c2].values
+    swir2 = s2_ds["swir2"].values
     print("Finish loading the swir2 band")
     
     
     tsmask = mtsmask[:, r1:r2, c1:c2]
- 
+
+    # number of rows
+    irow = tsmask.shape[1]
+
+    # number of columns
+    icol = tsmask.shape[2]
+    
+
+
     # Prepare tuples as input of multiprocessing 
-    ts_tuples=create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, tsmask)
+    ts_tuples=create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, irow, icol)
     
     results = []
     
@@ -152,12 +171,7 @@ def tsmask_filter_block(s2_ds, block, ncpu, mtsmask):
     print("Finish time series cloud and shadow detection for block(", r1, r2, c1, c2, ")")
 
  
-    # number of rows
-    irow = tsmask.shape[1]
-
-    # number of columns
-    icol = tsmask.shape[2]
-    
+  
     #number of time slice
     
     tn = s2_ds["time"].size
@@ -173,13 +187,90 @@ def tsmask_filter_block(s2_ds, block, ncpu, mtsmask):
     
     return 
     
+
+    
+def tsmask_filter_onearea(s2_ds, ncpu, tsmask):
+   
+  
+    
+    # Load NABR-T data from Dask array
+    
+   
+    blue = s2_ds["blue"].values
+    print("Finish loading the blue band")
+   
+    green = s2_ds["green"].values
+    print("Finish loading the green band")
+   
+    red = s2_ds["red"].values
+    print("Finish loading the red band")
+   
+    nir = s2_ds["nir"].values
+    print("Finish loading the nir band")
+   
+    swir1 = s2_ds["swir1"].values
+    print("Finish loading the swir1 band")
+   
+    swir2 = s2_ds["swir2"].values
+    print("Finish loading the swir2 band")
+    
+    
+   
+    # number of rows
+    irow = tsmask.shape[1]
+
+    # number of columns
+    icol = tsmask.shape[2]
+    
+
+
+    # Prepare tuples as input of multiprocessing 
+    ts_tuples=create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, irow, icol)
+    
+    results = []
+    
+    # number of process for the  pool object
+    number_of_workers = ncpu
+    
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+    
+    print("Begin runing time series cloud and shadow detection for block(", 0, irow, 0, icol, ")")
+    
+    # Start runing the cloud detection function using a pool of independent processes
+    results = p.starmap(cym.perpixel_filter_direct_core, ts_tuples)   
+   
+    p.close()
+    
+    # Join the results and put them back in the correct order
+    p.join()
+    
+    print("Finish time series cloud and shadow detection for block(", 0, irow, 0, icol, ")")
+
+ 
+  
+    #number of time slice
+    
+    tn = s2_ds["time"].size
+
+    tsmask = np.array(results).transpose().reshape(tn, irow, icol).copy()
+  
    
     
+    del ts_tuples
+    del results
+ 
+    
+
+    
+    return tsmask
+    
+       
     
 
 
 
-def create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, tsmask):
+def create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, irow ,icol):
 
     """
 
@@ -199,15 +290,9 @@ def create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, tsmask):
     Return: 
     
     a list of tuples of Sentinel-2 surface reflectance data
-
- 
     """
-    # number of rows
-    irow = tsmask.shape[1]
-
-    # number of columns
-    icol = tsmask.shape[2]
-
+   
+     
     # total number of pixels
     pnum = irow * icol
 
@@ -220,7 +305,7 @@ def create_ts_tuples_direct(blue, green, red, nir, swir1, swir2, tsmask):
 
         # copy time series spectral data from the data set, scale the data to float32, in range (0, 1.0)
 
-        ts_tuples.append((blue[:, y, x], green[:, y, x], red[:, y, x], nir[:, y, x], swir1[:, y, x], swir2[:, y, x], tsmask[:, y, x]))
+        ts_tuples.append((blue[:, y, x], green[:, y, x], red[:, y, x], nir[:, y, x], swir1[:, y, x], swir2[:, y, x]))
 
     return ts_tuples
 
@@ -254,6 +339,159 @@ def create_blocks_v2(irow, icol, ss):
     return blist
 
 
+def tsmask_one_iteration(ncpu, mem, block, proj, start_of_epoch, end_of_epoch, dirc, loc_str):
+    
+    
+    
+    [y1, y2, x1, x2] = block
+    #Datacube object
+    
+    dc = datacube.Datacube(app='load_clearsentinel')
+
+    
+    tg_ds=load_s2_nbart_ts_cor_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
+            "time": 1,
+        }, proj   )
+
+
+    memstr=str(mem)+'GB'
+    
+    client=Client(n_workers=ncpu, threads_per_worker=2, memory_limit = memstr)
+    
+    client.compute(tg_ds)
+
+    client.close()
+    
+    irow=tg_ds['y'].size
+    icol=tg_ds['x'].size
+    tn = tg_ds['time'].size
+
+
+    print(tn , irow, icol)
+    
+    # Create numpy array to store TSmask results
+    tsmask = np.zeros((tn, irow, icol), dtype=np.uint8)
+
+    print("Time series cloud and shadow detection for area (", y1, y2, x1, x2, ")")
+    
+    # Run time series cloud mask algorithm on the data 
+    tsmask = tsmask_filter_onearea(tg_ds, ncpu, tsmask)
+    
+    
+      
+     
+    print("Begin applying spatial filter")
+
+    results = []
+
+    # number of process for the  pool object
+    number_of_workers = ncpu
+
+    # Create a Pool object with a number of processes
+    p = Pool(number_of_workers)
+
+    # create a list of scene
+    paralist = [tsmask[i, :, :] for i in range(tn)]
+
+    # Start runing the spatial filter function using a pool of indepedent processes
+    results = p.map(cym.spatial_filter_v2, paralist)
+
+
+    # Finish the parallel runs
+    p.close()
+
+    # Join the results and put them back in the correct order
+    p.join()
+
+
+    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
+    for i in range(tn):
+        tsmask[i, :, :] = results[i]
+    
+    
+    
+    
+    tg_ds["tsmask"] = tg_ds["blue"]
+    tg_ds["tsmask"].values = tsmask
+
+    print("Begin writing output files")
+
+
+    #output the tsmask as cloud optimised geotiff files
+    bandsets=['tsmask']
+    outbandnames=['tsmask']
+
+    tsf.output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, tg_ds)
+
+    # Some peeks into the results, for validation purpose only, will be deleted later
+    
+    
+    print(tg_ds['tsmask'][:, 53, 3])
+
+    print(tg_ds['tsmask'][:, 153, 853])
+
+    print(tg_ds['tsmask'][100, :, :])
+    
+    tg_ds.close()
+
+
+
+def create_blocks_v3(irow, icol, tn, y1, y2, x1, x2, mem):
+    
+    # Memory factor, the higher value, the large memory footprint of the filter algorithm 
+    mfr = 3.6
+
+    # Calculate how many pixels/time stamps can be accommodated by the system memory
+    ss = int(720000*mfr*550*mem/tn/64)
+
+    blist=[]
+    pnum=icol*irow
+    if (ss>=pnum):
+        blist.append([y1, y2, x1, x2])
+    else:
+        pf = pnum//ss+1
+        width = (x2-x1)/pf
+        xl = x1
+        xr = x1+width
+        for i in range(pf):
+            blist.append([y1, y2, xl, xr])
+            xl = xr
+            xr += width
+            
+    
+   
+    return blist
+
+   
+
+def create_blocks_v4(irow, icol, tn, y1, y2, x1, x2, mem):
+    
+    # Memory factor, the higher value, the large memory footprint of the filter algorithm 
+    mfr = 3.6
+
+    # Calculate how many pixels/time stamps can be accommodated by the system memory
+    ss = int(720000*mfr*550*mem/tn/64)
+
+    blist=[]
+    pnum=icol*irow
+    
+    if (ss>=pnum):
+        blist.append([y1, y2, x1, x2])
+    else:
+        pf = pnum//ss+1
+        if pf > 4:
+            print("Area too large for one node")
+        else:
+            mx = (x1+x2)/2
+            my = (y1+y2)/2
+            blist.append([y1, my, x1, mx])
+            blist.append([y1, my, mx, x2])
+            blist.append([my, y2, x1, mx])
+            blist.append([my, y2, mx, x2])
+      
+   
+    return blist
+    
 def main():
     
     param=sys.argv
@@ -327,88 +565,35 @@ def main():
         }, proj   )
 
 
-
-
     irow=tg_ds['y'].size
     icol=tg_ds['x'].size
     tn = tg_ds['time'].size
 
-
+    
     print(tn , irow, icol)
 
-    #Create numpy array to store TSmask results
-    mtsmask = np.zeros((tn, irow, icol), dtype=np.uint8)
-
-    # Memory factor, the higher value, the large memory footprint of the filter algorithm 
-    mfr = 3.2
-
-    # Calculate how many pixels/time stamps can be accommodated by the system memory
-    ss = int(720000*mfr*550*mem/tn/64)
+   
 
     # Divide the dataset in multiple smaller chunks 
-    blist=create_blocks_v2(irow, icol, ss)
+    blist=create_blocks_v4(irow, icol, tn, y1, y2, x1, x2, mem)
 
     # Run time series cloud detection function in chunks
+    
+    cc = 1
+    ss = len(blist)
+    
+    if (ss==0):
+        exit()
+    
     for block in blist:
 
-        tsmask_filter_block(tg_ds, block, ncpu, mtsmask)
+        cur_loc_str = loc_str+'-'+ str(cc) +'-of-' +str(ss) 
+        tsmask_one_iteration(ncpu, mem, block, proj, start_of_epoch, end_of_epoch, dirc, cur_loc_str)
+        cc += 1
 
-
-
-    print("Begin applying spatial filter")
-
-    results = []
-
-    # number of process for the  pool object
-    number_of_workers = ncpu
-
-    # Create a Pool object with a number of processes
-    p = Pool(number_of_workers)
-
-    # create a list of scene
-    paralist = [mtsmask[i, :, :] for i in range(tn)]
-
-    # Start runing the spatial filter function using a pool of indepedent processes
-    results = p.map(cym.spatial_filter_v2, paralist)
-
-
-    # Finish the parallel runs
-    p.close()
-
-    # Join the results and put them back in the correct order
-    p.join()
-
-
-    # Save the cloud/shadow masks to the 'tsmask' dataarray in the s2_ds dataset
-    for i in range(tn):
-        mtsmask[i, :, :] = results[i]
-
-
-    # Add tsmask dataarray to the dataset
-
-
-    tg_ds["tsmask"] = tg_ds["blue"]
-    tg_ds["tsmask"].values = mtsmask
-
-    print("Begin writing output files")
-
-
-    #output the tsmask as cloud optimised geotiff files
-    bandsets=['tsmask']
-    outbandnames=['tsmask']
-
-    tsf.output_ds_to_cog(bandsets, outbandnames, dirc, loc_str, tg_ds)
-
-
-
-
-    print(tg_ds['tsmask'][:, 53, 3])
-
-    print(tg_ds['tsmask'][:, 153, 853])
-
-
-    print(tg_ds['tsmask'][100, :, :])
-
+    
+    tg_ds.close()
+    
 
 
 if __name__ == '__main__':
