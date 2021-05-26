@@ -568,7 +568,7 @@ def main():
         
     if out_crs == 'UTM':
         
-        out_crs = utm_code(x1, x2)    
+        out_crs = tsf.utm_code(x1, x2)    
     
     # Start of time epoch
     start_of_epoch = param[7]
