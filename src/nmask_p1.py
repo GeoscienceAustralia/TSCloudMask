@@ -566,6 +566,10 @@ def main():
     # output projection string: such as EPSG:3577, EPSG:4326,  
     out_crs = param[6]
         
+    if out_crs == 'UTM':
+        
+        out_crs = utm_code(x1, x2)    
+    
     # Start of time epoch
     start_of_epoch = param[7]
 
