@@ -40,7 +40,7 @@ def tsmask_filter_onearea(s2_ds, ncpu, tsmask):
   
     
     # Load NABR-T data from Dask array
-    
+    print(s2_ds)
    
     blue = s2_ds["blue"].values
     print("Finish loading the blue band")
@@ -370,7 +370,7 @@ def create_ip_data(s2_ds, bgids, loc_str, outdirc):
         np.save(tsbandfname, timebandnames)
 
 
-def tsmask_one_iteration(tg_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, loc_str):
+def tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, loc_str):
     
     
     
@@ -381,9 +381,9 @@ def tsmask_one_iteration(tg_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, 
     dc = datacube.Datacube(app='load_clearsentinel')
 
     
-    #tg_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
-    #        "time": 1,
-    #    }, crs, out_crs )
+    tg_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
+            "time": 1,
+        }, crs, out_crs )
 
 
     memstr=str(mem)+'GB'
@@ -451,7 +451,7 @@ def tsmask_one_iteration(tg_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, 
     
     
        
-    #tg_ds.close()
+    tg_ds.close()
 
 
 # This functioin divides the dataset into a list of blocks with smaller spatial dimensions 
@@ -571,19 +571,19 @@ def main():
     comm ='mkdir -p '+ dirc 
     os.system(comm)
 
-    dc = datacube.Datacube(app='load_clearsentinel')
+    #dc = datacube.Datacube(app='load_clearsentinel')
 
-    s2_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
-            "time": 1,
-        }, crs, out_crs   )
+    #tg_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
+    #        "time": 1,
+    #    }, crs, out_crs   )
 
 
-    irow=s2_ds['y'].size
-    icol=s2_ds['x'].size
-    tn = s2_ds['time'].size
+    #irow=tg_ds['y'].size
+    #icol=tg_ds['x'].size
+    #tn = tg_ds['time'].size
 
     
-    print(tn , irow, icol)
+    #print(tn , irow, icol)
 
    
 
@@ -608,11 +608,11 @@ def main():
         else:
             cur_loc_str = loc_str
         
-        tsmask_one_iteration(s2_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, cur_loc_str)
+        tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, cur_loc_str)
         cc += 1
 
     
-    s2_ds.close()
+    #tg_ds.close()
     
 
 
