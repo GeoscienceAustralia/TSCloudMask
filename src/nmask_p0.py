@@ -370,7 +370,7 @@ def create_ip_data(s2_ds, bgids, loc_str, outdirc):
         np.save(tsbandfname, timebandnames)
 
 
-def tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, loc_str):
+def tsmask_one_iteration(tg_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, loc_str):
     
     
     
@@ -381,9 +381,9 @@ def tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_
     dc = datacube.Datacube(app='load_clearsentinel')
 
     
-    tg_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
-            "time": 1,
-        }, crs, out_crs )
+    #tg_ds=tsf.load_s2_nbart_dask(dc, y1, y2, x1, x2, start_of_epoch, end_of_epoch, {   
+    #        "time": 1,
+    #    }, crs, out_crs )
 
 
     memstr=str(mem)+'GB'
@@ -451,7 +451,7 @@ def tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_
     
     
        
-    tg_ds.close()
+    #tg_ds.close()
 
 
 # This functioin divides the dataset into a list of blocks with smaller spatial dimensions 
@@ -608,7 +608,7 @@ def main():
         else:
             cur_loc_str = loc_str
         
-        tsmask_one_iteration(ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, cur_loc_str)
+        tsmask_one_iteration(s2_ds, ncpu, mem, block, crs, out_crs, start_of_epoch, end_of_epoch, dirc, cur_loc_str)
         cc += 1
 
     
