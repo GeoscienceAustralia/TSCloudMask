@@ -588,8 +588,11 @@ def main():
    
 
     # Divide the dataset in multiple smaller chunks 
-    blist=create_blocks_v4(irow, icol, tn, y1, y2, x1, x2, mem)
+    #blist=create_blocks_v4(irow, icol, tn, y1, y2, x1, x2, mem)
 
+    blist =[]
+    blist.append([y1, y2, x1, x2])
+    
     # Run time series cloud detection function in chunks
     
     cc = 1
