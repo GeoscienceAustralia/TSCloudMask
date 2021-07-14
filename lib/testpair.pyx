@@ -506,7 +506,7 @@ def spatial_filter_v2(onescene):
 
     return onescene
 
-def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2):
+def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, DTYPEINT8_t[:] tsmask):
     """
 
     Function Name: perpixel_filter_direct
@@ -644,7 +644,7 @@ def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTY
         ):  # thin cloud
             ctsmask[i] = 2
 
-    tsmask=np.zeros(tn, dtype=np.uint8)
+    #tsmask=np.zeros(tn, dtype=np.uint8)
     
     for i in range(tn):
         tsmask[i] = ctsmask[i]
@@ -658,6 +658,238 @@ def perpixel_filter_direct_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTY
     free(ctsmask)
     
     return tsmask
+
+def perpixel_filter_indices_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2):
+    """
+
+    Function Name: perpixel_filter_direct
+
+    Description: 
+    
+    This function performs time series cloud/shadow detection for one pixel
+  
+    Parameters: 
+    
+    blue, green, red, nir, swir1, swir2: float, 1D arrays
+        Surface reflectance time series data of band blue, green, red, nir, swir1, swir2 for the pixel
+        
+    tsmask: uint8, 1D array
+        Cloud /shadow mask time series for the pixel
+    
+    Return:  
+    
+    Updated cloud/shadow mask time serie
+
+ 
+    """
+    
+    cdef int tn
+   
+    # length of the time series
+    #tn = tsmask.size
+    tn = blue.size
+    
+    sa = <float *> malloc(tn*sizeof(float))
+    mndwi = <float *> malloc(tn*sizeof(float))
+    msavi = <float *> malloc(tn*sizeof(float))
+    wbi = <float *> malloc(tn*sizeof(float))
+    whi = <float *> malloc(tn*sizeof(float))
+    rgm = <float *> malloc(tn*sizeof(float))
+    grbm = <float *> malloc(tn*sizeof(float))
+    ctsmask = <DTYPEINT8_t *> malloc(tn*sizeof(char))
+    
+    cdef float blue_t, green_t, red_t, nir_t, swir1_t, swir2_t
+    cdef float scale = 10000.0
+    cdef float ival = -999.0/scale
+    
+    cdef int i
+    cdef int cc
+    cdef float scom
+    cdef float mv
+    
+    # Bright cloud theshold
+    cdef float maxcldthd = 0.45
+    
+    for i in range(tn):
+        ctsmask[i]=1
+        blue_t = blue[i]/scale
+        green_t = green[i]/scale
+        red_t = red[i]/scale
+        nir_t = nir[i]/scale
+        swir1_t = swir1[i]/scale
+        swir2_t = swir2[i]/scale
+        #print(blue_t, green_t, red_t, nir_t, swir1_t, swir2_t)
+        if (blue_t <=ival or green_t<=ival or red_t<=ival or nir_t<=ival or swir1_t<=ival or swir2_t<=ival or 
+            blue_t == 0 or green_t == 0 or red_t==0 or nir_t ==0 or swir1_t==0 or swir2_t==0):
+            ctsmask[i]=0
+        else:
+            sa[i] = (blue_t+green_t+red_t+nir_t+swir1_t+swir2_t)/6
+            if (green_t + swir1_t !=0):
+                mndwi[i] = ((green_t - swir1_t) / (green_t + swir1_t))
+            else:
+                ctsmask[i]=0
+            scom = (2*nir_t+1)*(2*nir_t+1) - 8*(nir_t - red_t)
+            if (scom > 0):
+                msavi[i] = (2 * nir_t + 1 -sqrt(scom))/2
+            else:
+                ctsmask[i]=0
+            
+            wbi[i] = (red_t - blue_t) / blue_t
+            rgm[i] = red_t + blue_t
+            grbm[i] = (green_t - (red_t + blue_t) / 2) / ((red_t + blue_t) / 2)
+                      
+            mv = (green_t + red_t + blue_t) / 3
+            whi[i]=0
+            whi[i] += fabs((blue_t - mv)/mv)
+            whi[i] += fabs((green_t - mv)/mv)
+            whi[i] += fabs((red_t - mv)/mv)
+
+            # label all ultra-bright pixels as clouds
+            if (sa[i] > maxcldthd):
+                ctsmask[i] = 2
+    
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # detect 2 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 2, ctsmask, tn)
+    testpair(sa, mndwi, 2, ctsmask, tn)
+
+    # detect 3 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 3, ctsmask, tn)
+
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # cloud shadow theshold
+    cdef float shdthd = 0.05
+
+    # mndwi water pixel theshold
+    cdef float dwithd = -0.05
+
+    # mndwi baregroud pixel theshold
+    cdef float landcloudthd = -0.38
+
+    # msavi water pixel theshold
+    cdef float avithd = 0.06
+
+    # mndwi water pixel theshold
+    cdef float wtdthd = -0.2
+
+    cdef DTYPEINT8_t lab
+                      
+    for i in range(tn):
+
+        lab = ctsmask[i]
+        if lab == 3 and mndwi[i] > dwithd and sa[i] < shdthd:  # water pixel, not shadow
+            ctsmask[i] = 1
+           
+
+        if lab == 2 and mndwi[i] < landcloudthd:  # bare ground, not cloud
+            ctsmask[i] = 1
+
+        if (
+            lab == 3 and msavi[i] < avithd and mndwi[i] > wtdthd
+        ):  # water pixel, not shadow
+            ctsmask[i] = 1
+
+        if (
+            lab == 1
+            and wbi[i] < -0.02
+            and rgm[i] > 0.06
+            and rgm[i] < 0.29
+            and mndwi[i] < -0.1
+            and grbm[i] < 0.2
+        ):  # thin cloud
+            ctsmask[i] = 2
+
+    indices=np.zeros(4, dtype=np.float32)
+    
+    cc = 0
+    for i in range(tn):
+        
+        if ctsmask[i] == 1:
+            
+            indices[0] += sa[i]
+            indices[1] += mndwi[i]
+            indices[2] += msavi[i]
+            indices[3] += whi[i]
+            
+            cc += 1
+            
+    
+    if cc > 0:
+        
+        indices /= cc
+        
+    
+    
+            
+    free(sa)
+    free(mndwi)
+    free(msavi)
+    free(wbi)
+    free(rgm)
+    free(grbm)
+    free(ctsmask)
+    free(whi)
+    
+    return indices
+
+
+
+def tsmask(DTYPEINT16_t[:, :, :] blue, DTYPEINT16_t[:, :, :] green, DTYPEINT16_t[:, :, :] red, DTYPEINT16_t[:, :, :] nir, DTYPEINT16_t[:, :, :] swir1, DTYPEINT16_t[:, :, :] swir2):
+    
+    cshp = blue.shape
+    
+    
+    tn  = cshp[0]
+    irow = cshp[1]
+    icol = cshp[2]
+    
+    tsmask = np.zeros((tn, irow, icol), dtype = np.uint8)
+    
+ 
+    cdef int y, x
+    
+    for y in range(irow):
+        for x in range(icol):
+            
+            tsmask[:, y, x ] = perpixel_filter_direct_core ( blue[:, y, x ],  green[:, y, x ],  red[:, y, x ],  nir[:, y, x ],  
+                                                                swir1[:, y, x ],  swir2[:, y, x ],  tsmask[:, y, x ])
+        
+    
+    
+    return tsmask
+
+def tsmask_lastdim(DTYPEINT16_t[:, :, :] blue, DTYPEINT16_t[:, :, :] green, DTYPEINT16_t[:, :, :] red, DTYPEINT16_t[:, :, :] nir, DTYPEINT16_t[:, :, :] swir1, DTYPEINT16_t[:, :, :] swir2):
+    
+    cshp = blue.shape
+    
+    
+    
+    irow = cshp[0]
+    icol = cshp[1]
+    tn  = cshp[2]
+    
+    indices = np.zeros((irow, icol, 4), dtype = np.float32)
+    
+ 
+    cdef int y, x
+    
+    for y in range(irow):
+        for x in range(icol):
+                    
+            indices[y, x, :] = perpixel_filter_indices_core ( blue[y, x, : ],  green[y, x, : ],  red[y, x, : ],  nir[y, x, : ],  
+                                                                swir1[y, x, : ],  swir2[y, x, : ])
+        
+            
+    
+    
+    return indices
+
 
 def perpixel_bg_indices_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, DTYPEINT8_t[:] tsmask):
     """
@@ -926,3 +1158,94 @@ def cal_indices(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red
     free(ctmask)
     
     return pysa, pymndwi, pymsavi, pywhi, mask
+
+
+
+
+def getipdata(DTYPEINT16_t[:,:] blue, DTYPEINT16_t[:,:] green, DTYPEINT16_t[:,:] red, DTYPEINT16_t[:,:] nir, DTYPEINT16_t[:,:] swir1, DTYPEINT16_t[:,:] swir2,  DTYPEFL_t[:,:] s6m,  DTYPEFL_t[:,:] mndwi,  DTYPEFL_t[:,:] msavi,  DTYPEFL_t[:,:] whi):
+    
+    
+    cdef float blue_t, green_t, red_t, nir_t, swir1_t, swir2_t
+    cdef float scom, mv, ivd
+    cdef float scale = 10000.0
+   
+    cdef int i, cc
+    
+    cdef float s6m_b, s6m_t
+    cdef float mndwi_b, mndwi_t
+    cdef float msavi_b, msavi_t
+    cdef float whi_b, whi_t    
+
+ 
+    
+    ivd = -0.0999
+    
+    
+    
+    cshp = blue.shape
+    
+    
+    
+    irow = cshp[0]
+    icol = cshp[1]
+    
+    ipdata = np.ones((irow, icol, 13), dtype = np.float32 )
+    
+    
+ 
+    cdef int y
+    cdef int x
+    
+    for y in range(irow):
+        for x in range(icol):
+            
+            blue_t = blue[y, x]/scale
+            green_t = green[y, x]/scale
+            red_t = red[y, x]/scale
+            nir_t = nir[y, x]/scale
+            swir1_t = swir1[y, x]/scale
+            swir2_t = swir2[y, x]/scale
+            s6m_b = s6m[y, x]
+            mndwi_b = mndwi[y, x]
+            msavi_b = msavi[y, x]
+            whi_b = whi[y, x]
+            
+            
+            
+            scom = (2*nir_t+1)*(2*nir_t+1) - 8*(nir_t - red_t)
+            mv = (green_t + red_t + blue_t) / 3
+    
+
+            if (blue_t<=ivd or green_t<=ivd or red_t<=ivd or swir1_t<=ivd or 
+                swir2_t<=ivd or scom<0 or mv==0 or s6m_b == 0 or mndwi_b == 0 or msavi_b ==0 or whi_b ==0):
+                ipdata[y, x, 12]=0
+            else:
+                ipdata[y, x, 12]=1
+                s6m_t = (blue_t+green_t+red_t+nir_t+swir1_t+swir2_t)/6
+                mndwi_t = ((green_t - swir1_t) / (green_t + swir1_t))
+                msavi_t = (2 * nir_t + 1 -np.sqrt(scom))/2
+                whi_t = fabs((blue_t - mv)/mv) + fabs((green_t - mv)/mv) + fabs((red_t - mv)/mv)
+                
+                
+                ipdata[y , x, 0] = s6m_b
+                ipdata[y , x, 1] = s6m_t
+                ipdata[y , x, 2] = (s6m_t - s6m_b) / s6m_b
+                
+                
+                ipdata[y , x, 3] = mndwi_b
+                ipdata[y , x, 4] = mndwi_t
+                ipdata[y , x, 5] = (mndwi_t - mndwi_b) / mndwi_b
+                
+                ipdata[y , x, 6] = msavi_b
+                ipdata[y , x, 7] = msavi_t
+                ipdata[y , x, 8] = (msavi_t - msavi_b) / msavi_b
+                
+                ipdata[y , x, 9] = whi_b
+                ipdata[y , x, 10] = whi_t
+                ipdata[y , x, 11] = (whi_t - whi_b) / whi_b
+                
+                
+                
+                
+                
+    return ipdata
