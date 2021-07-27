@@ -805,28 +805,43 @@ def perpixel_filter_indices_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DT
         ):  # thin cloud
             ctsmask[i] = 2
 
-    indices=np.zeros(4, dtype=np.float32)
+    cdef float sa_u, mndwi_u, msavi_u, whi_u
+    
+    
+    sa_u = 0
+    mndwi_u = 0
+    msavi_u = 0
+    whi_u = 0
+    
     
     cc = 0
     for i in range(tn):
         
         if ctsmask[i] == 1:
-            
-            indices[0] += sa[i]
-            indices[1] += mndwi[i]
-            indices[2] += msavi[i]
-            indices[3] += whi[i]
-            
+            sa_u += sa[i]
+            mndwi_u += mndwi[i]
+            msavi_u += msavi[i]
+            whi_u   += whi[i]
             cc += 1
             
+       
     
     if cc > 0:
         
-        indices /= cc
-        
+        sa_u /= cc
+        mndwi_u /= cc
+        msavi_u /= cc
+        whi_u /= cc
     
     
-            
+    
+    indices=np.zeros(4, dtype=np.float32)
+    
+    indices[0] = sa_u
+    indices[1] = mndwi_u
+    indices[2] = msavi_u
+    indices[3] = whi_u
+              
     free(sa)
     free(mndwi)
     free(msavi)
@@ -838,6 +853,236 @@ def perpixel_filter_indices_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DT
     
     return indices
 
+def perpixel_filter_indices_std_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2):
+    """
+
+    Function Name: perpixel_filter_direct
+
+    Description: 
+    
+    This function performs time series cloud/shadow detection for one pixel
+  
+    Parameters: 
+    
+    blue, green, red, nir, swir1, swir2: float, 1D arrays
+        Surface reflectance time series data of band blue, green, red, nir, swir1, swir2 for the pixel
+        
+    tsmask: uint8, 1D array
+        Cloud /shadow mask time series for the pixel
+    
+    Return:  
+    
+    Updated cloud/shadow mask time serie
+
+ 
+    """
+    
+    cdef int tn
+   
+    # length of the time series
+    #tn = tsmask.size
+    tn = blue.size
+    
+    sa = <float *> malloc(tn*sizeof(float))
+    mndwi = <float *> malloc(tn*sizeof(float))
+    msavi = <float *> malloc(tn*sizeof(float))
+    wbi = <float *> malloc(tn*sizeof(float))
+    whi = <float *> malloc(tn*sizeof(float))
+    rgm = <float *> malloc(tn*sizeof(float))
+    grbm = <float *> malloc(tn*sizeof(float))
+    ctsmask = <DTYPEINT8_t *> malloc(tn*sizeof(char))
+    
+    cdef float blue_t, green_t, red_t, nir_t, swir1_t, swir2_t
+    cdef float scale = 10000.0
+    cdef float ival = -999.0/scale
+    
+    cdef int i
+    cdef int cc
+    cdef float scom
+    cdef float mv
+    
+    # Bright cloud theshold
+    cdef float maxcldthd = 0.45
+    
+    for i in range(tn):
+        ctsmask[i]=1
+        blue_t = blue[i]/scale
+        green_t = green[i]/scale
+        red_t = red[i]/scale
+        nir_t = nir[i]/scale
+        swir1_t = swir1[i]/scale
+        swir2_t = swir2[i]/scale
+        #print(blue_t, green_t, red_t, nir_t, swir1_t, swir2_t)
+        if (blue_t <=ival or green_t<=ival or red_t<=ival or nir_t<=ival or swir1_t<=ival or swir2_t<=ival or 
+            blue_t == 0 or green_t == 0 or red_t==0 or nir_t ==0 or swir1_t==0 or swir2_t==0):
+            ctsmask[i]=0
+        else:
+            sa[i] = (blue_t+green_t+red_t+nir_t+swir1_t+swir2_t)/6
+            if (green_t + swir1_t !=0):
+                mndwi[i] = ((green_t - swir1_t) / (green_t + swir1_t))
+            else:
+                ctsmask[i]=0
+            scom = (2*nir_t+1)*(2*nir_t+1) - 8*(nir_t - red_t)
+            if (scom > 0):
+                msavi[i] = (2 * nir_t + 1 -sqrt(scom))/2
+            else:
+                ctsmask[i]=0
+            
+            wbi[i] = (red_t - blue_t) / blue_t
+            rgm[i] = red_t + blue_t
+            grbm[i] = (green_t - (red_t + blue_t) / 2) / ((red_t + blue_t) / 2)
+                      
+            mv = (green_t + red_t + blue_t) / 3
+            whi[i]=0
+            whi[i] += fabs((blue_t - mv)/mv)
+            whi[i] += fabs((green_t - mv)/mv)
+            whi[i] += fabs((red_t - mv)/mv)
+
+            # label all ultra-bright pixels as clouds
+            if (sa[i] > maxcldthd):
+                ctsmask[i] = 2
+    
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # detect 2 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 2, ctsmask, tn)
+    testpair(sa, mndwi, 2, ctsmask, tn)
+
+    # detect 3 consecutive cloud / shadow pixels
+    testpair(sa, mndwi, 3, ctsmask, tn)
+
+    # detect single cloud / shadow pixels
+    testpair(sa, mndwi, 1, ctsmask, tn)
+
+    # cloud shadow theshold
+    cdef float shdthd = 0.05
+
+    # mndwi water pixel theshold
+    cdef float dwithd = -0.05
+
+    # mndwi baregroud pixel theshold
+    cdef float landcloudthd = -0.38
+
+    # msavi water pixel theshold
+    cdef float avithd = 0.06
+
+    # mndwi water pixel theshold
+    cdef float wtdthd = -0.2
+
+    cdef DTYPEINT8_t lab
+                      
+    for i in range(tn):
+
+        lab = ctsmask[i]
+        if lab == 3 and mndwi[i] > dwithd and sa[i] < shdthd:  # water pixel, not shadow
+            ctsmask[i] = 1
+           
+
+        if lab == 2 and mndwi[i] < landcloudthd:  # bare ground, not cloud
+            ctsmask[i] = 1
+
+        if (
+            lab == 3 and msavi[i] < avithd and mndwi[i] > wtdthd
+        ):  # water pixel, not shadow
+            ctsmask[i] = 1
+
+        if (
+            lab == 1
+            and wbi[i] < -0.02
+            and rgm[i] > 0.06
+            and rgm[i] < 0.29
+            and mndwi[i] < -0.1
+            and grbm[i] < 0.2
+        ):  # thin cloud
+            ctsmask[i] = 2
+
+   
+    cdef float sa_u, mndwi_u, msavi_u, whi_u
+    cdef float sa_std, mndwi_std, msavi_std, whi_std
+    
+    sa_u = 0
+    mndwi_u = 0
+    msavi_u = 0
+    whi_u = 0
+    
+    sa_std = 0
+    mndwi_std = 0
+    msavi_std = 0
+    whi_std = 0
+    
+    cc = 0
+    for i in range(tn):
+        
+        if ctsmask[i] == 1:
+            
+            sa_u += sa[i]
+            mndwi_u += mndwi[i]
+            msavi_u += msavi[i]
+            whi_u   += whi[i]
+            cc += 1
+            
+    
+    if cc > 0:
+        
+        sa_u /= cc
+        mndwi_u /= cc
+        msavi_u /= cc
+        whi_u /= cc
+    
+    
+    cdef int NM1
+    
+    NM1 = cc - 1
+    
+    if cc>1:
+        for i in range(tn):
+            if ctsmask[i] == 1:
+                           
+                sa_std += (sa[i] - sa_u) *  (sa[i] - sa_u) 
+                mndwi_std += (mndwi[i] - mndwi_u) * (mndwi[i] - mndwi_u)
+                msavi_std += (msavi[i] - msavi_u) * (msavi[i] - msavi_u)
+                whi_std += (whi[i] - whi_u) * (whi[i] - whi_u)
+    
+        
+        
+        sa_std /= NM1
+        mndwi_std /= NM1
+        msavi_std /= NM1
+        whi_std /= NM1
+    
+    
+        sa_std = sqrt(sa_std)
+        mndwi_std = sqrt(mndwi_std)
+        msavi_std = sqrt(msavi_std)
+        whi_std = sqrt(whi_std)
+    
+    indices=np.zeros(8, dtype=np.float32)
+    
+    indices[0] = sa_u
+    indices[1] = sa_std
+    indices[2] = mndwi_u
+    indices[3] = mndwi_std
+    indices[4] = msavi_u
+    indices[5] = msavi_std
+    indices[6] = whi_u
+    indices[7] = whi_std
+    
+    
+    
+    
+    free(sa)
+    free(mndwi)
+    free(msavi)
+    free(wbi)
+    free(rgm)
+    free(grbm)
+    free(ctsmask)
+    free(whi)
+    
+    return indices
 
 
 def tsmask(DTYPEINT16_t[:, :, :] blue, DTYPEINT16_t[:, :, :] green, DTYPEINT16_t[:, :, :] red, DTYPEINT16_t[:, :, :] nir, DTYPEINT16_t[:, :, :] swir1, DTYPEINT16_t[:, :, :] swir2):
@@ -889,6 +1134,34 @@ def tsmask_lastdim(DTYPEINT16_t[:, :, :] blue, DTYPEINT16_t[:, :, :] green, DTYP
     
     
     return indices
+
+
+def tsmask_lastdim_std(DTYPEINT16_t[:, :, :] blue, DTYPEINT16_t[:, :, :] green, DTYPEINT16_t[:, :, :] red, DTYPEINT16_t[:, :, :] nir, DTYPEINT16_t[:, :, :] swir1, DTYPEINT16_t[:, :, :] swir2):
+    
+    cshp = blue.shape
+    
+    
+    
+    irow = cshp[0]
+    icol = cshp[1]
+    tn  = cshp[2]
+    
+    indices = np.zeros((irow, icol, 8), dtype = np.float32)
+    
+ 
+    cdef int y, x
+    
+    for y in range(irow):
+        for x in range(icol):
+                    
+            indices[y, x, :] = perpixel_filter_indices_std_core ( blue[y, x, : ],  green[y, x, : ],  red[y, x, : ],  nir[y, x, : ],  
+                                                                swir1[y, x, : ],  swir2[y, x, : ])
+        
+            
+    
+    
+    return indices
+
 
 
 def perpixel_bg_indices_core(DTYPEINT16_t[:] blue, DTYPEINT16_t[:] green, DTYPEINT16_t[:] red, DTYPEINT16_t[:] nir, DTYPEINT16_t[:] swir1, DTYPEINT16_t[:] swir2, DTYPEINT8_t[:] tsmask):
