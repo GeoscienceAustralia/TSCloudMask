@@ -11,10 +11,10 @@ from odc.stats.model import Task
 from odc.algo.io import load_with_native_transform
 from odc.algo import safe_div, apply_numexpr, keep_good_only, binary_dilation
 from odc.algo.io import dc_load
-from .model import StatsPluginInterface
-from . import _plugins
+from odc.stats.model import StatsPluginInterface
+from odc.stats import _plugins
 
-from .nmask import nmask_pmod
+from . import nmask_pmod
 
 
 class StatsNmask(StatsPluginInterface):
@@ -33,6 +33,9 @@ class StatsNmask(StatsPluginInterface):
     ):
         self.resampling = resampling
 
+    def _native_tr(self, xx):
+        return xx
+
     @property
     def measurements(self) -> Tuple[str, ...]:
         return ('s6m', 's6m_std',
@@ -46,11 +49,13 @@ class StatsNmask(StatsPluginInterface):
 
         xx = load_with_native_transform(
             task.datasets,
-            bands=["water"],
+            bands=["nbart_green", "nbart_blue", "nbart_red",
+                   "nbart_nir_2", "nbart_swir_2", "nbart_swir_3"],
             geobox=task.geobox,
             groupby=groupby,
             resampling=self.resampling,
             chunks=chunks,
+            native_transform=self._native_tr,
         )
 
         return xx
