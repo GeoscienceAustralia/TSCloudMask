@@ -4,6 +4,7 @@ Nmask Ancillary Summaries
 TODO(pjt554): Description goes here
 
 """
+import dask
 from typing import Optional, Tuple
 import numpy as np
 import xarray as xr
@@ -61,6 +62,8 @@ class StatsNmask(StatsPluginInterface):
         return xx
 
     def reduce(self, xx: xr.Dataset) -> xr.Dataset:
-        return nmask_pmod.summarise(xx)
+        template = xr.Dataset({m: xx.nbart_blue
+                               for m in self.measurements})
+        return xr.map_blocks(nmask_pmod.summarise, xx, template=template)
 
 _plugins.register("nmask-ancillary", StatsNmask)
