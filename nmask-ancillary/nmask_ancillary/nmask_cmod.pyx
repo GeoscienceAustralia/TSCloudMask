@@ -1442,3 +1442,132 @@ def getipdata(DTYPEINT16_t[:,:] blue, DTYPEINT16_t[:,:] green, DTYPEINT16_t[:,:]
                 
                 
     return ipdata
+
+
+def getipdata_vb(DTYPEINT16_t[:,:] blue, DTYPEINT16_t[:,:] green, DTYPEINT16_t[:,:] red, DTYPEINT16_t[:,:] nir, DTYPEINT16_t[:,:] swir1, DTYPEINT16_t[:,:] swir2,  DTYPEFL_t[:,:] s6m, DTYPEFL_t[:,:] s6m_std, DTYPEFL_t[:,:] mndwi,  DTYPEFL_t[:,:] mndwi_std, DTYPEFL_t[:,:] msavi, DTYPEFL_t[:,:] msavi_std,  DTYPEFL_t[:,:] whi, DTYPEFL_t[:,:] whi_std):
+    
+    """
+
+    Description: 
+    
+    This function creates input data for the Nmask ANN model for a 2D array of pixels
+  
+    Parameters: 
+    
+        Names of variables: blue, green, red, nir, swir1, swir2
+        Descriptions: surface reflectance data of band blue, green, red, nir, swir1, swir2 for a 2D array of pixels
+        Data types and formats: int16, 2D arrays 
+        
+        Names of variables: s6m, mndwi, msavi, whi
+        Descriptions: long term means of a set of spectral indices 
+        Data types and formats: float32, 2D arrays 
+        
+        Order of dimensions: y, x
+            
+        
+    
+    Return:  
+    
+        Descriptions: input data for the Nmask ANN model for a 2D array of pixels
+        Names of variables: ipdata
+        Data types and formats: float32, 3D arrays 
+        Order of dimensions: y, x, input features
+    
+    
+        
+   
+    """
+    
+    
+    
+    
+    cdef float blue_t, green_t, red_t, nir_t, swir1_t, swir2_t
+    cdef float scom, mv, ivd
+    cdef float scale = 10000.0
+   
+    cdef int i, cc
+    
+    cdef float s6m_b, s6m_t
+    cdef float mndwi_b, mndwi_t
+    cdef float msavi_b, msavi_t
+    cdef float whi_b, whi_t    
+
+    cdef float s6m_std_b 
+    cdef float mndwi_std_b 
+    cdef float msavi_std_b
+    cdef float whi_std_b 
+
+
+    
+    ivd = -0.0999
+     
+    
+    cshp = blue.shape
+       
+    
+    irow = cshp[0]
+    icol = cshp[1]
+    
+    ipdata = np.ones((irow, icol, 13), dtype = np.float32 )
+    
+    
+ 
+    cdef int y
+    cdef int x
+    
+    for y in range(irow):
+        for x in range(icol):
+            
+            blue_t = blue[y, x]/scale
+            green_t = green[y, x]/scale
+            red_t = red[y, x]/scale
+            nir_t = nir[y, x]/scale
+            swir1_t = swir1[y, x]/scale
+            swir2_t = swir2[y, x]/scale
+            s6m_b = s6m[y, x]
+            mndwi_b = mndwi[y, x]
+            msavi_b = msavi[y, x]
+            whi_b = whi[y, x]
+            
+            s6m_std_b = s6m_std[y, x]
+            mndwi_std_b = mndwi_std[y, x]
+            msavi_std_b = msavi_std[y, x]
+            whi_std_b = whi_std[y, x]
+            
+            scom = (2*nir_t+1)*(2*nir_t+1) - 8*(nir_t - red_t)
+            mv = (green_t + red_t + blue_t) / 3
+    
+
+            if (blue_t<=ivd or green_t<=ivd or red_t<=ivd or swir1_t<=ivd or 
+                swir2_t<=ivd or scom<0 or mv==0 or s6m_std_b == 0 or mndwi_std_b == 0 or msavi_std_b ==0 or whi_std_b ==0):
+                ipdata[y, x, 12]=0
+            else:
+                ipdata[y, x, 12]=1
+                s6m_t = (blue_t+green_t+red_t+nir_t+swir1_t+swir2_t)/6
+                mndwi_t = ((green_t - swir1_t) / (green_t + swir1_t))
+                msavi_t = (2 * nir_t + 1 -np.sqrt(scom))/2
+                whi_t = fabs((blue_t - mv)/mv) + fabs((green_t - mv)/mv) + fabs((red_t - mv)/mv)
+                
+                
+                ipdata[y , x, 0] = s6m_b
+                ipdata[y , x, 1] = s6m_t
+                ipdata[y , x, 2] = (s6m_t - s6m_b) / s6m_std_b
+                
+                
+                ipdata[y , x, 3] = mndwi_b
+                ipdata[y , x, 4] = mndwi_t
+                ipdata[y , x, 5] = (mndwi_t - mndwi_b) / mndwi_std_b
+                
+                ipdata[y , x, 6] = msavi_b
+                ipdata[y , x, 7] = msavi_t
+                ipdata[y , x, 8] = (msavi_t - msavi_b) / msavi_std_b
+                
+                ipdata[y , x, 9] = whi_b
+                ipdata[y , x, 10] = whi_t
+                ipdata[y , x, 11] = (whi_t - whi_b) / whi_std_b
+                
+                
+                
+                
+                
+    return ipdata
