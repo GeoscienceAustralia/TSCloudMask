@@ -1654,7 +1654,7 @@ def spatial_filter_shadow(onescene):
         for x in range(2, icol-2):
             # if the center pixel in the block is a cloud or shadow
             idx = y * icol + x
-            if (tsmask[idx] == 3):
+            if (tsmask[idx] == 3 or tsmask[idx]==2):
                 # if total number of cloud/shadow pixels in the block is less than M,
                 # label the center pixel as a clear pixel
                 cc=0
