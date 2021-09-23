@@ -12,7 +12,12 @@ from datacube.utils.cog import write_cog
 
 import nmask_cmod as cym
 from dask.distributed import Client
+from datacube.testutils.io import dc_read
+from datacube.virtual import Transformation, Measurement
+from xarray import Dataset
 
+import tensorflow as tf
+import tensorflow.keras.models as models
 
 
 def get_timebandnames(s2_ds):
@@ -260,6 +265,38 @@ def summarise_dask(scenes, ncpu, blocklist):
 
 def partition_blocks(irow, icol, prow, pcol):
     
+    
+    """
+
+    Description: 
+    
+    This function partitions a 2D scene into a set of smaller 2-D blocks
+  
+    Parameters: 
+    
+        Names of variables: irow, icol
+        Descriptions: size of the 2-D scene
+        Data types and formats: int32 
+            
+        Names of variables: prow, pcol
+        Descriptions: number of partitions in y and x directions
+        Data types and formats: int32
+    
+    Return:  
+    
+        Names of variables: py, px
+        Descriptions: size of sub blocks
+        Data types and formats: int32 
+        
+        Names of variables: blocklist
+        Descriptions: a list of bounding boxes, which define a set of sub blocks
+        Data types and formats: int32
+        
+    
+        
+   
+    """
+    
     py = irow // prow + 1
     px = icol // pcol + 1
     
@@ -304,16 +341,67 @@ def formfactor(mem, tn, irow, icol):
         return i
             
 
+
+        
+def load_s2_ard(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs, chunks):
     
-def prep_dask_dataset(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs, mem):
+    
+    
+    allbands = [
+        "nbart_blue",
+        "nbart_green",
+        "nbart_red",
+        "nbart_nir_2",
+        "nbart_swir_2",
+        "nbart_swir_3"
+    ]
+    
+  
+    query = {
+        "crs": crs,
+        "x": (x1, x2),
+        "y": (y1, y2),
+        "time": (start_of_epoch, end_of_epoch),
+        "output_crs": out_crs,
+        "resolution": (-20, 20),
+        "measurements": allbands,
+        "group_by": "solar_day"
+        }
     
     
     dc = datacube.Datacube(app='load_clearsentinel')
+    dss1 = dc.find_datasets(product = 's2a_ard_granule', **query)
+    dss2 = dc.find_datasets(product = 's2b_ard_granule', **query)
+    
+    
+    newquery = {
+        "crs": crs,
+        "x": (x1, x2),
+        "y": (y1, y2),
+        "time": (start_of_epoch, end_of_epoch),
+        "output_crs": out_crs,
+        "resolution": (-20, 20),
+        "measurements": allbands,
+        "dask_chunks": chunks,
+        "group_by": "solar_day"
+        }
+    
+    
+    
+    im = dc.load(datasets=dss1+dss2, **newquery)
+    
+    return im
+        
 
-    s2_ds = dc.load(['s2a_ard_granule', 's2b_ard_granule'], crs = crs, output_crs=out_crs, resolution=(-20, 20), time=(start_of_epoch, end_of_epoch),
-             x = (x1, x2), y = (y1, y2), group_by='solar_day', dask_chunks = {"time": 1},  measurements=['nbart_red', 'nbart_green', 'nbart_blue',
-                                                             'nbart_nir_2', 'nbart_swir_2', 'nbart_swir_3'])
-  
+    
+def prep_dask_dataset(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs, mem):
+    
+ 
+    
+    chunks ={"time": 1}
+    s2_ds = load_s2_ard(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs, chunks)
+    
+    
     # number of rows
     irow=s2_ds['y'].size
     # number of columns
@@ -328,9 +416,211 @@ def prep_dask_dataset(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs
     
     chy, chx, blocklist = partition_blocks(irow, icol, ff, ff)
 
-    scenes = dc.load(['s2a_ard_granule', 's2b_ard_granule'], crs = crs, output_crs=out_crs, resolution=(-20, 20), time=(start_of_epoch, end_of_epoch),
-             x = (x1, x2), y = (y1, y2), group_by='solar_day', dask_chunks = {"time": 1, "y": chy, "x" : chx },  
-                     measurements=['nbart_red', 'nbart_green', 'nbart_blue', 'nbart_nir_2', 'nbart_swir_2', 'nbart_swir_3'])
-  
+    chunks = {"time": 1, "y": chy, "x" : chx }
     
+    scenes = load_s2_ard(y1, y2, x1, x2, start_of_epoch, end_of_epoch, crs, out_crs, chunks)
+  
     return scenes, blocklist
+
+
+def std_by_paramters(data, rs, msarr):
+    
+    ntr=data.shape[1]
+    for i in np.arange(ntr):
+        clm=data[:, i]
+        mu=msarr[i]
+        std=msarr[i+ntr]
+        clm=(clm-mu)/(rs*std)
+        data[:,i]=clm
+
+    return data
+
+
+
+def cal_ip_data_vb(blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std):
+    
+    """
+
+    Description: 
+    
+    This function calculates input features for the Nmask ANN model 
+  
+    Parameters: 
+    
+        Names of variables: blue, green, red, nir, swir1, swir2
+        Descriptions: S2 spectral bands
+        Data types and formats: 2-D array of int16 
+            
+        Names of variables: s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std
+        Descriptions: long term mean and standard deviations of s6m, mndwi, 
+        Data types and formats: int32
+    
+    Return:  
+    
+        Names of variables: ipdata
+        Descriptions: input features for the Nmask ANN model 
+        Data types and formats: 2-D array of float32 
+        
+           
+   
+    """
+   
+    ipdata = cym.getipdata_vb(blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std)
+       
+    return ipdata
+
+
+
+
+def tf_data_vb(blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std):
+    return xr.apply_ufunc(
+        cal_ip_data_vb, blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std,
+        dask='parallelized',
+        output_core_dims= [['ipdata']], 
+        dask_gufunc_kwargs = {'output_sizes' : {'ipdata' : 13}},
+        output_dtypes = [np.float32]
+    )
+
+
+
+def nmask_transform(scenes, medians, client):
+    
+    # location and name of the Nmask ANN model
+    # need to be set to a relative location with in the model when it is packaged
+    modeldirc ='/home/jovyan/tsmask_repos/TSCloudMask/models'
+    modelname ='nmask_vb_comb'
+
+    #Load normalisation parameters for the input data
+    parafilename=modeldirc+'/'+modelname+'_standarise_parameters.npy'
+    norm_paras = np.load(parafilename)
+
+    #Load neural network model 
+    modelfilename=modeldirc+'/'+modelname+'_model'
+    model = models.load_model(modelfilename)
+
+    chy, chx = 500, 500
+
+    # number of rows
+    irow=scenes.coords['y'].size
+    # number of columns
+    icol=scenes.coords['x'].size
+    # number of time steps
+    tn = scenes.coords['time'].size
+
+    tbnamelist = get_timebandnames(scenes.coords)
+
+    #Classify each scene in the time series and output the cloud mask as a cog file
+    for i in range(tn):
+        #load data for one scene 
+        nmask = np.zeros(irow*icol, dtype=np.uint8)
+        blue = scenes.nbart_blue[i, :, :].persist()
+        green = scenes.nbart_green[i, :, :].persist()
+        red = scenes.nbart_red[i, :, :].persist()
+        nir = scenes.nbart_nir_2[i, :, :].persist()
+        swir1 = scenes.nbart_swir_2[i, :, :].persist()
+        swir2 = scenes.nbart_swir_3[i, :, :].persist()
+        s6m = medians.s6m.persist()
+        mndwi = medians.mndwi.persist()
+        msavi = medians.msavi.persist()
+        whi = medians.whi.persist()
+        s6m_std = medians.s6m_std.persist()
+        mndwi_std = medians.mndwi_std.persist()
+        msavi_std = medians.msavi_std.persist()
+        whi_std = medians.whi_std.persist()
+
+        #prepare the input data for the nerual network model, each row of the ipdata represents a pixel
+        #ipdata = tf_data(blue, green, red, nir, swir1, swir2, s6m, mndwi, msavi, whi).compute()
+        
+        ipdata = tf_data_vb(blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std).compute()
+        
+        # Last column of the ipdata indicate if a pixel contains invalid input values
+        ipmask = ipdata[:, :, 12].data
+        tfdata = ipdata[:, :, 0:12].data
+
+        #prepare the input data for the neural network model, filtering out invalid pixels
+        ipmask = ipmask.flatten().astype(np.int8)
+        tfdata = tfdata.reshape(irow*icol, 12)
+        tfdata = tfdata[ipmask == 1]
+        tfdata = std_by_paramters(tfdata, 2, norm_paras)
+
+        tbname = tbnamelist[i]
+        print("Begin classifying scene ", tbname)
+        mixtures=model.predict(tfdata)
+        vdmask = np.argmax(mixtures, axis = 1) + 1
+
+        # reconstuct the cloud mask image, invalid pixels have a cloud mask value of zero
+        nmask[ipmask==1] = vdmask
+        nmask = nmask.reshape(irow, icol)
+
+        #Apply sptail filter to the cloud mask, eliminate cloud masks with less than 2 neighbours 
+        nmask = cym.spatial_filter_v2(nmask)
+        nmask = cym.spatial_filter_shadow(nmask)
+        
+        nmask = cym.spatial_filter_v2(nmask)
+        nmask = cym.spatial_filter_shadow(nmask)
+
+        #output the cloud mask as a cog file
+        yield nmask
+        
+        
+        
+NMASK_OUTPUT = [{
+    'name': 'nmask',
+    'dtype': 'uint8',
+    'nodata': 0,
+    'clear': 1,
+    'cloud': 2,
+    'shadow': 3,
+    'units': '1'
+}, ]
+
+def _to_xrds_coords(geobox):
+    return {dim: coord.values for dim, coord in geobox.coordinates.items()}
+
+
+
+class NmaskClassifier(Transformation):
+    
+    def __init__(self, median_path=None, indstr=None, n_workers=2):
+        
+        # directory or location where the long term mean of indices locate
+        self.median_path = median_path
+        # Patterns of indices file,.e.g '56HLH_{}_2015-01-01_2020-12-31-cog.tif' 
+        self.indstr = indstr
+        # number of workers of Dask client
+        self.n_workers = n_workers
+        
+        self.output_measurements = {m['name']: Measurement(**m) for m in NMASK_OUTPUT}
+        
+   
+    def measurements(self, input_measurements):
+        return self.output_measurements
+
+    def compute(self, data) -> Dataset:
+        client = Client(n_workers = self.n_workers, threads_per_worker=1, processes = True)
+        medians = self._load_medians(data.geobox)
+        nmasks = []
+        for nmask in nmask_transform(data, medians=medians, client=client):
+            nmasks.append(nmask)
+        
+        nmasks = xr.Dataset({'nmask': (('time', 'y', 'x'), nmasks)}, coords=data.coords)
+        nmasks.attrs['crs'] = data.attrs['crs']
+        return nmasks
+
+    def _load_medians(self, gbox):
+        
+        indices_list=['s6m', 's6m_std', 'mndwi', 'mndwi_std', 'msavi', 'msavi_std', 'whi', 'whi_std']
+        medians = {ind: dc_read('{}/{}'.format(self.median_path, self.indstr.format(ind)), gbox=gbox, resampling="bilinear")
+                   for ind in indices_list}
+        return xr.Dataset(
+            data_vars={ind: (('y', 'x'), medians[ind])
+                        for ind in indices_list},
+            coords=_to_xrds_coords(gbox),
+            attrs={'crs': gbox.crs}
+        )
+    
+    
+def Nmask(tg_ds, s3bkt, indstr, n_workers=2):
+    nmc = NmaskClassifier(s3bkt, indstr, n_workers)
+    nmask = nmc.compute(tg_ds)
+    return nmask  
