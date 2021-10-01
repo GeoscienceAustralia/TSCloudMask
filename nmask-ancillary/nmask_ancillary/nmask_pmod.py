@@ -528,10 +528,15 @@ def nmask_transform(scenes, medians, client):
         msavi_std = medians.msavi_std.persist()
         whi_std = medians.whi_std.persist()
 
+        
+     
         #prepare the input data for the nerual network model, each row of the ipdata represents a pixel
         #ipdata = tf_data(blue, green, red, nir, swir1, swir2, s6m, mndwi, msavi, whi).compute()
         
         ipdata = tf_data_vb(blue, green, red, nir, swir1, swir2, s6m, s6m_std, mndwi, mndwi_std, msavi, msavi_std, whi, whi_std).compute()
+        
+        print("Finish loading data", tbname)
+        
         
         # Last column of the ipdata indicate if a pixel contains invalid input values
         ipmask = ipdata[:, :, 12].data
@@ -544,7 +549,7 @@ def nmask_transform(scenes, medians, client):
         tfdata = std_by_paramters(tfdata, 2, norm_paras)
 
         tbname = tbnamelist[i]
-        print("Begin classifying scene ", tbname)
+        print("Classifying the scene ", tbname)
         mixtures=model.predict(tfdata)
         vdmask = np.argmax(mixtures, axis = 1) + 1
 
@@ -552,13 +557,17 @@ def nmask_transform(scenes, medians, client):
         nmask[ipmask==1] = vdmask
         nmask = nmask.reshape(irow, icol)
 
+        
+        print("Applying spatial filter ", tbname)
         #Apply sptail filter to the cloud mask, eliminate cloud masks with less than 2 neighbours 
         nmask = cym.spatial_filter_v2(nmask)
         nmask = cym.spatial_filter_shadow(nmask)
         
         nmask = cym.spatial_filter_v2(nmask)
         nmask = cym.spatial_filter_shadow(nmask)
-
+        
+        
+        client.close()
         #output the cloud mask as a cog file
         yield nmask
         
